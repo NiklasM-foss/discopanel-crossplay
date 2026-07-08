@@ -411,7 +411,8 @@ def wait_for_boot(sid, log, timeout=300):
 JOBS = {}  # job_id -> queue.Queue
 
 
-def provision(job_id, name, version, install_xbox, players, memory_gb=None):
+def provision(job_id, name, version, install_xbox, players, memory_gb=None,
+              slots=None, view_distance=None):
     q = JOBS[job_id]
 
     def log(msg, **extra):
@@ -419,10 +420,19 @@ def provision(job_id, name, version, install_xbox, players, memory_gb=None):
 
     try:
         plan = plan_for_players(players)
-        manual_ram = False
-        if memory_gb:  # explicit override from the form (in GB)
+        manual = set()
+        if memory_gb:  # explicit overrides from the form
             plan["memory"] = max(1024, min(MEM_MAX_GB * 1024, int(memory_gb * 1024)))
-            manual_ram = True
+            manual.add("ram")
+        if slots:
+            plan["max_players"] = max(1, min(1000, int(slots)))
+            manual.add("slots")
+        if view_distance:
+            vd = max(2, min(32, int(view_distance)))
+            plan["view_distance"] = vd
+            if plan["simulation_distance"] > vd:  # sim can't exceed view
+                plan["simulation_distance"] = vd
+            manual.add("view")
         gb = plan["memory"] / 1024
         servers = list_servers()
         hostname = slugify(name)
@@ -431,10 +441,12 @@ def provision(job_id, name, version, install_xbox, players, memory_gb=None):
         port = next_bedrock_port(servers)
         log(f"Next free Bedrock port: {port}", port=port, hostname=hostname)
 
-        ram_note = f"{gb:.0f} GB RAM (manual)" if manual_ram else f"{gb:.0f} GB RAM"
+        def m(key):
+            return " (manual)" if key in manual else ""
         log(
-            f"~{plan['players']} players -> {ram_note}, {plan['max_players']} "
-            f"slots, view/sim distance {plan['view_distance']}/{plan['simulation_distance']}"
+            f"~{plan['players']} players -> {gb:.0f} GB RAM{m('ram')}, "
+            f"{plan['max_players']} slots{m('slots')}, view {plan['view_distance']}"
+            f"{m('view')} / sim {plan['simulation_distance']}"
         )
         log(f"Creating Paper {version} server '{name}'")
         create = rpc(
@@ -599,18 +611,24 @@ def create():
         players = int(data.get("players") or 8)
     except (TypeError, ValueError):
         players = 8
-    memory_gb = data.get("memory")
-    try:
-        memory_gb = float(memory_gb) if memory_gb not in (None, "", 0) else None
-    except (TypeError, ValueError):
-        memory_gb = None
+    def opt_num(key, cast):
+        v = data.get(key)
+        try:
+            return cast(v) if v not in (None, "", 0) else None
+        except (TypeError, ValueError):
+            return None
+
+    memory_gb = opt_num("memory", float)
+    slots = opt_num("slots", int)
+    view_distance = opt_num("view", int)
     if not name or not version:
         return jsonify({"error": "name and version are required"}), 400
     job_id = uuid.uuid4().hex
     JOBS[job_id] = queue.Queue()
     threading.Thread(
         target=provision,
-        args=(job_id, name, version, install_xbox, players, memory_gb),
+        args=(job_id, name, version, install_xbox, players, memory_gb,
+              slots, view_distance),
         daemon=True,
     ).start()
     return jsonify({"job": job_id})

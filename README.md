@@ -20,9 +20,11 @@ and it does the rest.
   | > 64     | 24 GB | 150                  | 6 / 4    |
 
   "Slots" is the maximum number of players allowed on the server at once
-  (`max-players` in `server.properties`). The **RAM can also be set manually**
-  in the form (GB) to override the tier for that server; leave it empty for
-  automatic sizing. The manual value is capped by `MEM_MAX_GB` (default 24).
+  (`max-players` in `server.properties`). **RAM, slots and view distance can
+  each be set manually** in the form to override the automatic tier for that
+  server; leave a field empty for automatic sizing. Ranges: RAM 1-`MEM_MAX_GB`
+  GB (default cap 24), slots 1-1000, view distance 2-32 chunks (simulation
+  distance is clamped to not exceed the view distance).
 
 - Creates a **Paper** server on the chosen Minecraft version.
 - Publishes it through the DiscoPanel proxy using a **custom hostname + base

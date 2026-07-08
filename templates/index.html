@@ -70,11 +70,23 @@
       <label for="players">Spieler (ca. gleichzeitig)</label>
       <input id="players" type="number" min="1" max="200" step="1" value="8" />
     </div>
+  </div>
+
+  <div class="row">
     <div>
-      <label for="ram">RAM (GB, optional)</label>
+      <label for="ram">RAM (GB)</label>
       <input id="ram" type="number" min="1" max="24" step="1" placeholder="auto" />
     </div>
+    <div>
+      <label for="slots">Slots (max. Spieler)</label>
+      <input id="slots" type="number" min="1" max="1000" step="1" placeholder="auto" />
+    </div>
+    <div>
+      <label for="view">Sichtweite (Chunks)</label>
+      <input id="view" type="number" min="2" max="32" step="1" placeholder="auto" />
+    </div>
   </div>
+  <p class="meta">Leer = automatisch nach Spielerzahl. Werte überschreiben die Automatik.</p>
 
   <p class="meta" id="sizemeta">Zuweisung: <b id="size-ram">…</b> RAM · max. <b id="size-slots">…</b> Spieler (Slots) · Sichtweite <b id="size-view">…</b></p>
 
@@ -116,11 +128,13 @@ function planFor(players) {
 }
 function updateSize() {
   const pl = planFor($("players").value);
-  const manual = parseInt($("ram").value, 10);
-  const ram = (manual >= 1) ? manual + " GB (manuell)" : (pl.mem / 1024) + " GB";
-  $("size-ram").textContent = ram;
-  $("size-slots").textContent = pl.slots;
-  $("size-view").textContent = pl.view;
+  const ram = parseInt($("ram").value, 10);
+  const slots = parseInt($("slots").value, 10);
+  const view = parseInt($("view").value, 10);
+  const tag = (m) => m ? " (manuell)" : "";
+  $("size-ram").textContent = (ram >= 1 ? ram : pl.mem / 1024) + " GB" + tag(ram >= 1);
+  $("size-slots").textContent = (slots >= 1 ? slots : pl.slots) + tag(slots >= 1);
+  $("size-view").textContent = (view >= 2 ? view : pl.view) + tag(view >= 2);
 }
 
 async function loadMeta() {
@@ -144,8 +158,9 @@ async function loadMeta() {
 }
 loadMeta();
 updateSize();
-$("players").addEventListener("input", updateSize);
-$("ram").addEventListener("input", updateSize);
+["players", "ram", "slots", "view"].forEach(
+  (id) => $(id).addEventListener("input", updateSize)
+);
 
 function addLine(msg, cls) {
   const box = $("log"); box.style.display = "block";
@@ -170,6 +185,8 @@ $("go").addEventListener("click", async () => {
         name, version,
         players: parseInt($("players").value, 10) || 8,
         memory: parseInt($("ram").value, 10) || null,
+        slots: parseInt($("slots").value, 10) || null,
+        view: parseInt($("view").value, 10) || null,
         xbox: $("xbox").checked,
       }),
     })).json();
