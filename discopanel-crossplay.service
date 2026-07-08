@@ -1,0 +1,16 @@
+[Unit]
+Description=DiscoPanel Crossplay Provisioner
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=niklas
+WorkingDirectory=/opt/discopanel-crossplay
+EnvironmentFile=/etc/discopanel-crossplay.env
+ExecStart=/opt/discopanel-crossplay/.venv/bin/python /opt/discopanel-crossplay/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

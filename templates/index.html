@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crossplay Server Provisioner</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0; background: #0f1115; color: #e6e8ee;
+    display: flex; justify-content: center; padding: 32px 16px;
+  }
+  .card {
+    width: 100%; max-width: 640px; background: #171a21;
+    border: 1px solid #262b36; border-radius: 14px; padding: 28px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.35);
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { color: #8b93a7; margin: 0 0 22px; font-size: 14px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
+  input[type=text], select {
+    width: 100%; padding: 11px 12px; border-radius: 9px;
+    border: 1px solid #2c3340; background: #0f1218; color: #e6e8ee; font-size: 15px;
+  }
+  .row { display: flex; gap: 14px; }
+  .row > div { flex: 1; }
+  .check { display: flex; align-items: center; gap: 9px; margin-top: 16px; font-size: 14px; color: #c3c9d6; }
+  .check input { width: 16px; height: 16px; }
+  button {
+    margin-top: 22px; width: 100%; padding: 13px; font-size: 15px; font-weight: 600;
+    border: 0; border-radius: 10px; background: #4f7cff; color: #fff; cursor: pointer;
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  .meta { font-size: 12.5px; color: #7a8296; margin-top: 8px; }
+  .meta b { color: #a9b2c6; }
+  #log { margin-top: 22px; display: none; }
+  .line { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 12.5px;
+          padding: 6px 10px; border-left: 2px solid #2c3340; margin: 3px 0; color: #c3c9d6; }
+  .line.err { border-color: #ff5c5c; color: #ff9c9c; }
+  .line.ok  { border-color: #46d17f; color: #a7ecc4; }
+  .xbox {
+    margin-top: 18px; padding: 16px; border-radius: 10px;
+    background: #12261a; border: 1px solid #1f7a44; display: none;
+  }
+  .xbox a { color: #7fe0a6; font-weight: 700; }
+  .code { font-size: 26px; font-weight: 800; letter-spacing: 3px; color: #fff; margin: 6px 0; }
+  .result { margin-top: 18px; padding: 16px; border-radius: 10px;
+            background: #14203a; border: 1px solid #2c4a86; display: none; }
+  .result code { background: #0d1526; padding: 2px 7px; border-radius: 5px; color: #9ec3ff; }
+  .kv { display: flex; justify-content: space-between; padding: 5px 0; font-size: 14px; border-bottom: 1px solid #22304f; }
+  .kv:last-child { border: 0; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Crossplay Server</h1>
+  <p class="sub">Paper + Geyser/Floodgate + ViaVersion-Stack + MCXboxBroadcast, fertig konfiguriert.</p>
+
+  <label for="name">Servername</label>
+  <input id="name" type="text" placeholder="z.B. Survival" autocomplete="off" />
+
+  <div class="row">
+    <div>
+      <label for="version">Paper-Version</label>
+      <select id="version"><option>lädt…</option></select>
+    </div>
+  </div>
+
+  <label class="check"><input id="xbox" type="checkbox" checked /> MCXboxBroadcast installieren (Xbox-Freunde-Beitritt)</label>
+
+  <p class="meta" id="portmeta">Nächster freier Bedrock-Port: <b id="nextport">…</b></p>
+
+  <button id="go">Server anlegen</button>
+
+  <div id="xbox-box" class="xbox">
+    <div>Einmalige Xbox-Anmeldung nötig:</div>
+    <div class="code" id="xbox-code">—</div>
+    Öffne <a id="xbox-url" href="#" target="_blank">microsoft.com/link</a> und gib den Code ein
+    (mit dem Xbox-Konto für diesen Server anmelden).
+  </div>
+
+  <div id="result" class="result">
+    <div class="kv"><span>Java (über Proxy)</span><code id="r-java"></code></div>
+    <div class="kv"><span>Bedrock</span><code id="r-bedrock"></code></div>
+    <div class="kv"><span>Bedrock-Port</span><code id="r-port"></code></div>
+  </div>
+
+  <div id="log"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function loadMeta() {
+  try {
+    const v = await (await fetch("/api/versions")).json();
+    const sel = $("version");
+    sel.innerHTML = "";
+    (v.versions || []).forEach((ver, i) => {
+      const o = document.createElement("option");
+      o.value = ver; o.textContent = ver;
+      if (i === 0) o.selected = true;
+      sel.appendChild(o);
+    });
+    if (!v.versions || !v.versions.length) sel.innerHTML = "<option value=''>keine Versionen geladen</option>";
+  } catch (e) { $("version").innerHTML = "<option value=''>Fehler beim Laden</option>"; }
+  try {
+    const s = await (await fetch("/api/servers")).json();
+    if (s.next_port) $("nextport").textContent = s.next_port;
+    else $("portmeta").textContent = "Panel nicht erreichbar: " + (s.error || "");
+  } catch (e) { $("portmeta").textContent = "Panel nicht erreichbar"; }
+}
+loadMeta();
+
+function addLine(msg, cls) {
+  const box = $("log"); box.style.display = "block";
+  const d = document.createElement("div");
+  d.className = "line" + (cls ? " " + cls : "");
+  d.textContent = msg; box.appendChild(d);
+  d.scrollIntoView({ block: "nearest" });
+}
+
+$("go").addEventListener("click", async () => {
+  const name = $("name").value.trim();
+  const version = $("version").value;
+  if (!name) { $("name").focus(); return; }
+  $("go").disabled = true; $("go").textContent = "Wird angelegt…";
+  $("log").innerHTML = ""; $("result").style.display = "none"; $("xbox-box").style.display = "none";
+
+  let job;
+  try {
+    const r = await (await fetch("/create", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, version, xbox: $("xbox").checked }),
+    })).json();
+    if (r.error) throw new Error(r.error);
+    job = r.job;
+  } catch (e) { addLine("Fehler: " + e.message, "err"); resetBtn(); return; }
+
+  const es = new EventSource("/stream/" + job);
+  es.onmessage = (ev) => {
+    const d = JSON.parse(ev.data);
+    if (d.type === "log") {
+      addLine(d.msg);
+      if (d.xbox_code) {
+        $("xbox-box").style.display = "block";
+        $("xbox-code").textContent = d.xbox_code;
+        $("xbox-url").href = d.xbox_url || "https://www.microsoft.com/link";
+        $("xbox-url").textContent = (d.xbox_url || "microsoft.com/link").replace(/^https?:\/\//, "");
+      }
+    } else if (d.type === "done") {
+      addLine("Fertig ✔", "ok");
+      $("r-java").textContent = d.connect_java;
+      $("r-bedrock").textContent = d.connect_bedrock;
+      $("r-port").textContent = d.port;
+      $("result").style.display = "block";
+      es.close(); resetBtn(); loadMeta();
+    } else if (d.type === "error") {
+      addLine("Fehler: " + d.msg, "err");
+      es.close(); resetBtn();
+    }
+  };
+  es.onerror = () => { addLine("Verbindung zum Server verloren", "err"); es.close(); resetBtn(); };
+});
+
+function resetBtn() { $("go").disabled = false; $("go").textContent = "Server anlegen"; }
+</script>
+</body>
+</html>
