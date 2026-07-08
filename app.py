@@ -115,6 +115,38 @@ def slugify(name):
     return slug or "server"
 
 
+# Upper bound for a manual RAM override from the form (GB).
+MEM_MAX_GB = int(os.environ.get("MEM_MAX_GB", "24"))
+
+# Sizing tiers keyed on the expected number of concurrent players. Memory is a
+# bit generous because the crossplay stack (Geyser + ViaVersion) adds overhead.
+# (max_players_expected, memory_mb, max_slots, view_distance, simulation_distance)
+SIZING_TIERS = [
+    (4, 6144, 8, 10, 8),
+    (8, 8192, 12, 10, 8),
+    (16, 12288, 24, 10, 6),
+    (32, 16384, 40, 8, 6),
+    (64, 20480, 80, 8, 5),
+    (10 ** 9, 24576, 150, 6, 4),
+]
+
+
+def plan_for_players(players):
+    """Map an expected concurrent player count to server sizing."""
+    p = max(1, int(players or 1))
+    for cap, mem, slots, view, sim in SIZING_TIERS:
+        if p <= cap:
+            return {
+                "players": p,
+                "memory": mem,
+                "max_players": slots,
+                "view_distance": view,
+                "simulation_distance": sim,
+            }
+    return {"players": p, "memory": 24576, "max_players": 150,
+            "view_distance": 6, "simulation_distance": 4}
+
+
 # --------------------------------------------------------------------------
 # Local filesystem helpers (app runs on the DiscoPanel host)
 # --------------------------------------------------------------------------
@@ -313,15 +345,16 @@ def server_status(sid):
     return ""
 
 
-def stop_and_start(sid, log):
-    """Reload the server by stopping then starting the SAME container.
+def apply_settings_and_reload(sid, plan, log):
+    """Stop, apply the player-count game settings, then start.
 
-    Intentionally not RestartServer: DiscoPanel *recreates* the container on
-    restart, which can fail with a container name/port conflict if the previous
-    container has not fully gone away. Stop + start reuses the existing
-    container, so it is conflict-free.
+    UpdateServerConfig recreates the container *cleanly* (it stops+removes the
+    old one before creating the new one), so this both applies the new env
+    (slots, view/sim distance) and loads the freshly-staged crossplay plugins -
+    without ever hitting DiscoPanel's restart path, which recreates the
+    container without removing the old one first and can name/port-conflict.
     """
-    log("Stopping server to load the crossplay stack")
+    log("Stopping server to apply settings and load the crossplay stack")
     rpc("ServerService", "StopServer", {"id": sid})
     deadline = time.time() + 120
     while time.time() < deadline:
@@ -329,6 +362,22 @@ def stop_and_start(sid, log):
         if st in ("SERVER_STATUS_STOPPED", "SERVER_STATUS_ERROR", "", None):
             break
         time.sleep(3)
+    log(
+        f"Applying game settings ({plan['max_players']} slots, view/sim "
+        f"distance {plan['view_distance']}/{plan['simulation_distance']})"
+    )
+    rpc(
+        "ConfigService",
+        "UpdateServerConfig",
+        {
+            "serverId": sid,
+            "updates": {
+                "maxPlayers": str(plan["max_players"]),
+                "viewDistance": str(plan["view_distance"]),
+                "simulationDistance": str(plan["simulation_distance"]),
+            },
+        },
+    )
     log("Starting server with the crossplay stack loaded")
     start_server(sid, log)
 
@@ -362,13 +411,19 @@ def wait_for_boot(sid, log, timeout=300):
 JOBS = {}  # job_id -> queue.Queue
 
 
-def provision(job_id, name, version, install_xbox):
+def provision(job_id, name, version, install_xbox, players, memory_gb=None):
     q = JOBS[job_id]
 
     def log(msg, **extra):
         q.put({"type": "log", "msg": msg, **extra})
 
     try:
+        plan = plan_for_players(players)
+        manual_ram = False
+        if memory_gb:  # explicit override from the form (in GB)
+            plan["memory"] = max(1024, min(MEM_MAX_GB * 1024, int(memory_gb * 1024)))
+            manual_ram = True
+        gb = plan["memory"] / 1024
         servers = list_servers()
         hostname = slugify(name)
         if any(hostname == slugify(s.get("name", "")) for s in servers):
@@ -376,7 +431,12 @@ def provision(job_id, name, version, install_xbox):
         port = next_bedrock_port(servers)
         log(f"Next free Bedrock port: {port}", port=port, hostname=hostname)
 
-        log(f"Creating Paper {version} server '{name}' (4 GB RAM)")
+        ram_note = f"{gb:.0f} GB RAM (manual)" if manual_ram else f"{gb:.0f} GB RAM"
+        log(
+            f"~{plan['players']} players -> {ram_note}, {plan['max_players']} "
+            f"slots, view/sim distance {plan['view_distance']}/{plan['simulation_distance']}"
+        )
+        log(f"Creating Paper {version} server '{name}'")
         create = rpc(
             "ServerService",
             "CreateServer",
@@ -385,8 +445,8 @@ def provision(job_id, name, version, install_xbox):
                 "description": "Bedrock/Java crossplay (provisioned)",
                 "modLoader": "MOD_LOADER_PAPER",
                 "mcVersion": version,
-                "memory": 4096,
-                "maxPlayers": 20,
+                "memory": plan["memory"],
+                "maxPlayers": plan["max_players"],
                 "proxyHostname": hostname,
                 "proxyListenerId": PROXY_LISTENER,
                 "useBaseUrl": True,
@@ -406,7 +466,9 @@ def provision(job_id, name, version, install_xbox):
         full_host = server.get("proxyHostname", hostname)
         log(f"Server created (id {sid[:8]}), reachable at {full_host}", server_id=sid)
 
-        # Set loader/version explicitly (harmless; no container yet).
+        # Set loader/version explicitly (harmless; no container yet). The
+        # player-count game settings are applied later, once a container exists,
+        # because config changes only take effect via a container recreate.
         rpc(
             "ConfigService",
             "UpdateServerConfig",
@@ -429,7 +491,7 @@ def provision(job_id, name, version, install_xbox):
         if install_xbox:
             install_mcxbox(server_dir, port, log)
 
-        stop_and_start(sid, log)
+        apply_settings_and_reload(sid, plan, log)
 
         wait_for_boot(sid, log)
         log("Server is up; crossplay stack active")
@@ -533,12 +595,23 @@ def create():
     name = (data.get("name") or "").strip()
     version = (data.get("version") or "").strip()
     install_xbox = bool(data.get("xbox", True))
+    try:
+        players = int(data.get("players") or 8)
+    except (TypeError, ValueError):
+        players = 8
+    memory_gb = data.get("memory")
+    try:
+        memory_gb = float(memory_gb) if memory_gb not in (None, "", 0) else None
+    except (TypeError, ValueError):
+        memory_gb = None
     if not name or not version:
         return jsonify({"error": "name and version are required"}), 400
     job_id = uuid.uuid4().hex
     JOBS[job_id] = queue.Queue()
     threading.Thread(
-        target=provision, args=(job_id, name, version, install_xbox), daemon=True
+        target=provision,
+        args=(job_id, name, version, install_xbox, players, memory_gb),
+        daemon=True,
     ).start()
     return jsonify({"job": job_id})
 

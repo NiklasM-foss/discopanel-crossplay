@@ -7,7 +7,24 @@ and it does the rest.
 
 ## What it does per server
 
-- Creates a **Paper** server on the chosen Minecraft version with **4 GB RAM**.
+- Asks how many players are expected and **sizes the server accordingly**
+  (RAM, player slots, view/simulation distance):
+
+  | ~Players | RAM   | Slots (max. players) | View/Sim |
+  |----------|-------|----------------------|----------|
+  | ≤ 4      | 6 GB  | 8                    | 10 / 8   |
+  | ≤ 8      | 8 GB  | 12                   | 10 / 8   |
+  | ≤ 16     | 12 GB | 24                   | 10 / 6   |
+  | ≤ 32     | 16 GB | 40                   | 8 / 6    |
+  | ≤ 64     | 20 GB | 80                   | 8 / 5    |
+  | > 64     | 24 GB | 150                  | 6 / 4    |
+
+  "Slots" is the maximum number of players allowed on the server at once
+  (`max-players` in `server.properties`). The **RAM can also be set manually**
+  in the form (GB) to override the tier for that server; leave it empty for
+  automatic sizing. The manual value is capped by `MEM_MAX_GB` (default 24).
+
+- Creates a **Paper** server on the chosen Minecraft version.
 - Publishes it through the DiscoPanel proxy using a **custom hostname + base
   domain** (`<name>.mc.niklasmetzger.de`).
 - Installs the newest crossplay plugin stack:

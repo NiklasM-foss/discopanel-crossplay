@@ -66,7 +66,17 @@
       <label for="version">Paper-Version</label>
       <select id="version"><option>lädt…</option></select>
     </div>
+    <div>
+      <label for="players">Spieler (ca. gleichzeitig)</label>
+      <input id="players" type="number" min="1" max="200" step="1" value="8" />
+    </div>
+    <div>
+      <label for="ram">RAM (GB, optional)</label>
+      <input id="ram" type="number" min="1" max="24" step="1" placeholder="auto" />
+    </div>
   </div>
+
+  <p class="meta" id="sizemeta">Zuweisung: <b id="size-ram">…</b> RAM · max. <b id="size-slots">…</b> Spieler (Slots) · Sichtweite <b id="size-view">…</b></p>
 
   <label class="check"><input id="xbox" type="checkbox" checked /> MCXboxBroadcast installieren (Xbox-Freunde-Beitritt)</label>
 
@@ -93,6 +103,26 @@
 <script>
 const $ = (id) => document.getElementById(id);
 
+// Keep these tiers in sync with plan_for_players() in app.py.
+const SIZING_TIERS = [
+  [4, 6144, 8, 10], [8, 8192, 12, 10], [16, 12288, 24, 10],
+  [32, 16384, 40, 8], [64, 20480, 80, 8], [1e9, 24576, 150, 6],
+];
+function planFor(players) {
+  const p = Math.max(1, parseInt(players, 10) || 1);
+  for (const [cap, mem, slots, view] of SIZING_TIERS)
+    if (p <= cap) return { mem, slots, view };
+  return { mem: 12288, slots: 150, view: 6 };
+}
+function updateSize() {
+  const pl = planFor($("players").value);
+  const manual = parseInt($("ram").value, 10);
+  const ram = (manual >= 1) ? manual + " GB (manuell)" : (pl.mem / 1024) + " GB";
+  $("size-ram").textContent = ram;
+  $("size-slots").textContent = pl.slots;
+  $("size-view").textContent = pl.view;
+}
+
 async function loadMeta() {
   try {
     const v = await (await fetch("/api/versions")).json();
@@ -113,6 +143,9 @@ async function loadMeta() {
   } catch (e) { $("portmeta").textContent = "Panel nicht erreichbar"; }
 }
 loadMeta();
+updateSize();
+$("players").addEventListener("input", updateSize);
+$("ram").addEventListener("input", updateSize);
 
 function addLine(msg, cls) {
   const box = $("log"); box.style.display = "block";
@@ -133,7 +166,12 @@ $("go").addEventListener("click", async () => {
   try {
     const r = await (await fetch("/create", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, version, xbox: $("xbox").checked }),
+      body: JSON.stringify({
+        name, version,
+        players: parseInt($("players").value, 10) || 8,
+        memory: parseInt($("ram").value, 10) || null,
+        xbox: $("xbox").checked,
+      }),
     })).json();
     if (r.error) throw new Error(r.error);
     job = r.job;
