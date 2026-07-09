@@ -32,6 +32,10 @@ and it does the rest.
 - Installs the newest crossplay plugin stack:
   **ViaVersion, ViaBackwards, ViaRewind, SkinsRestorer, Geyser, Floodgate**
   (Geyser + Floodgate configured for Bedrock/Java crossplay via Floodgate auth).
+- Installs a small **admin plugin stack** on top: **EssentialsX** (core
+  commands/homes/warps), **VaultUnlocked** (the maintained, API-compatible Vault
+  drop-in that EssentialsX and LuckPerms hook into), **LuckPerms** (permissions)
+  and **AntiAFKPlus** (AFK handling).
 - Assigns the **next free Bedrock UDP port** starting at `19132`
   (server 1 → 19132, server 2 → 19133, …) and forwards it as an additional
   UDP port. That range is already DNAT-forwarded end-to-end by the public
@@ -98,6 +102,25 @@ boot**, so a single clean start brings everything up correctly:
 This deliberately avoids restarting the server. DiscoPanel *recreates* the
 container on restart, which can fail with a name/port conflict if the previous
 container has not fully gone away - so we configure everything up front instead.
+
+## AFK whitelist (exempting players)
+
+AntiAFKPlus handles idle players; the "whitelist" of players who are **exempt**
+from AFK checks/kicks is the permission `antiafkplus.bypass`. Grant it to a
+player with LuckPerms (installed automatically):
+
+```
+/lp user <name> permission set antiafkplus.bypass true
+```
+
+Give a whole group the bypass and add players to that group instead if you want
+a named list:
+
+```
+/lp creategroup afkwhitelist
+/lp group afkwhitelist permission set antiafkplus.bypass true
+/lp user <name> parent add afkwhitelist
+```
 
 ## Notes
 

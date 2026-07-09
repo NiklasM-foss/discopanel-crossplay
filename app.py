@@ -12,7 +12,8 @@ Per created server it:
   * creates a Paper server (chosen MC version, 4 GB RAM)
   * publishes it through the DiscoPanel proxy (custom hostname + base domain)
   * installs the newest crossplay plugin stack (ViaVersion, ViaBackwards,
-    ViaRewind, SkinsRestorer, Geyser, Floodgate)
+    ViaRewind, SkinsRestorer, Geyser, Floodgate) plus a small admin stack
+    (EssentialsX, VaultUnlocked, LuckPerms, AntiAFKPlus)
   * assigns the next free Bedrock UDP port from 19132 and forwards it
   * installs the newest MCXboxBroadcast Geyser extension, points it at the
     public IP and the server's Bedrock port, and surfaces the one-time
@@ -60,7 +61,16 @@ GEYSERMC_PLUGINS = {
 # The rest come from Modrinth (newest release). We install jars directly rather
 # than via itzg's MODRINTH_PROJECTS, which filters by the exact Minecraft
 # version and fails for Paper's calendar versions (e.g. 26.1.2).
-MODRINTH_PLUGINS = ["viaversion", "viabackwards", "viarewind", "skinsrestorer"]
+#   crossplay : viaversion/viabackwards/viarewind translate client versions,
+#               skinsrestorer restores Bedrock/offline skins.
+#   admin     : essentialsx (core commands), vaultunlocked (maintained, API-
+#               compatible Vault drop-in that EssentialsX/LuckPerms hook into),
+#               luckperms (permissions), antiafkplus (AFK handling; exempt
+#               players via the "antiafkplus.bypass" permission = the whitelist).
+MODRINTH_PLUGINS = [
+    "viaversion", "viabackwards", "viarewind", "skinsrestorer",
+    "essentialsx", "vaultunlocked", "luckperms", "antiafkplus",
+]
 MCXBOX_SLUG = "mcxboxbroadcast"
 
 # Geyser config is pre-written before the first boot so crossplay is correct
@@ -209,7 +219,7 @@ def _modrinth_newest_file(slug):
 
 
 def resolve_plugin_downloads():
-    """Return [(filename, url)] for the six crossplay plugins (newest builds)."""
+    """Return [(filename, url)] for the whole plugin stack (newest builds)."""
     downloads = []
     for p, fn in GEYSERMC_PLUGINS.items():
         downloads.append((fn, GEYSERMC_DL.format(p=p)))
