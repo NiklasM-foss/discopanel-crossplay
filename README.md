@@ -34,8 +34,11 @@ and it does the rest.
   (Geyser + Floodgate configured for Bedrock/Java crossplay via Floodgate auth).
 - Installs a small **admin plugin stack** on top: **EssentialsX** (core
   commands/homes/warps), **VaultUnlocked** (the maintained, API-compatible Vault
-  drop-in that EssentialsX and LuckPerms hook into), **LuckPerms** (permissions)
-  and **AntiAFKPlus** (AFK handling).
+  drop-in that EssentialsX and LuckPerms hook into), **LuckPerms** (permissions),
+  **AntiAFKPlus** (AFK handling), **Chunky** (world pre-generation) and
+  **BetterTeams** (teams/clans).
+- Disables **spawn protection** (`spawn-protection=0`) so non-ops can build near
+  spawn.
 - Assigns the **next free Bedrock UDP port** starting at `19132`
   (server 1 → 19132, server 2 → 19133, …) and forwards it as an additional
   UDP port. That range is already DNAT-forwarded end-to-end by the public
@@ -124,10 +127,12 @@ a named list:
 
 ## Notes
 
-- Geyser and Floodgate come from the canonical GeyserMC download API; Via* and
-  SkinsRestorer from Modrinth (newest release each). Jars are installed directly
-  rather than via itzg's `MODRINTH_PROJECTS`, which filters by the exact MC
-  version and fails for Paper's calendar versions.
+- Geyser and Floodgate come from the canonical GeyserMC download API; Via*,
+  SkinsRestorer, EssentialsX, VaultUnlocked, LuckPerms, AntiAFKPlus and Chunky
+  from Modrinth (newest release each); BetterTeams from its GitHub releases
+  (newest release that attaches a jar - it isn't on Modrinth/Hangar for Spigot).
+  Jars are installed directly rather than via itzg's `MODRINTH_PROJECTS`, which
+  filters by the exact MC version and fails for Paper's calendar versions.
 - MCXboxBroadcast is a Geyser *extension* (not a plugin), pre-staged into
   `plugins/Geyser-Spigot/extensions/`.
 - `geyser-config.yml` is a version-matched Geyser config template

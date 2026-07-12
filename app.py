@@ -13,7 +13,8 @@ Per created server it:
   * publishes it through the DiscoPanel proxy (custom hostname + base domain)
   * installs the newest crossplay plugin stack (ViaVersion, ViaBackwards,
     ViaRewind, SkinsRestorer, Geyser, Floodgate) plus a small admin stack
-    (EssentialsX, VaultUnlocked, LuckPerms, AntiAFKPlus)
+    (EssentialsX, VaultUnlocked, LuckPerms, AntiAFKPlus, Chunky, BetterTeams)
+    and disables spawn protection (spawn-protection=0)
   * assigns the next free Bedrock UDP port from 19132 and forwards it
   * installs the newest MCXboxBroadcast Geyser extension, points it at the
     public IP and the server's Bedrock port, and surfaces the one-time
@@ -66,11 +67,17 @@ GEYSERMC_PLUGINS = {
 #   admin     : essentialsx (core commands), vaultunlocked (maintained, API-
 #               compatible Vault drop-in that EssentialsX/LuckPerms hook into),
 #               luckperms (permissions), antiafkplus (AFK handling; exempt
-#               players via the "antiafkplus.bypass" permission = the whitelist).
+#               players via the "antiafkplus.bypass" permission = the whitelist),
+#               chunky (world pre-generation).
 MODRINTH_PLUGINS = [
     "viaversion", "viabackwards", "viarewind", "skinsrestorer",
-    "essentialsx", "vaultunlocked", "luckperms", "antiafkplus",
+    "essentialsx", "vaultunlocked", "luckperms", "antiafkplus", "chunky",
 ]
+# BetterTeams (teams/clans plugin) is not on Modrinth/Hangar for Spigot; the
+# canonical plugin publishes release jars on GitHub. We pick the newest release
+# that actually carries a matching jar asset (booksaw only attaches jars to some
+# releases; the rest are SpigotMC-only). (repo, jar name fragment).
+GITHUB_PLUGINS = [("booksaw/BetterTeams", "betterteams")]
 MCXBOX_SLUG = "mcxboxbroadcast"
 
 # Geyser config is pre-written before the first boot so crossplay is correct
@@ -218,6 +225,21 @@ def _modrinth_newest_file(slug):
     return f["filename"], f["url"]
 
 
+def _github_newest_asset(repo, fragment):
+    """(filename, url) of the jar asset (matching fragment) from the newest
+    GitHub release of `repo` that actually attaches one."""
+    api = f"https://api.github.com/repos/{repo}/releases?per_page=30"
+    req = urllib.request.Request(api, headers=UA)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        releases = json.loads(resp.read().decode())
+    for rel in releases:  # newest first
+        for a in rel.get("assets", []):
+            n = a.get("name", "")
+            if fragment.lower() in n.lower() and n.lower().endswith(".jar"):
+                return n, a["browser_download_url"]
+    raise RuntimeError(f"no jar asset matching '{fragment}' in {repo} releases")
+
+
 def resolve_plugin_downloads():
     """Return [(filename, url)] for the whole plugin stack (newest builds)."""
     downloads = []
@@ -225,6 +247,8 @@ def resolve_plugin_downloads():
         downloads.append((fn, GEYSERMC_DL.format(p=p)))
     for slug in MODRINTH_PLUGINS:
         downloads.append(_modrinth_newest_file(slug))
+    for repo, fragment in GITHUB_PLUGINS:
+        downloads.append(_github_newest_asset(repo, fragment))
     return downloads
 
 
@@ -374,7 +398,8 @@ def apply_settings_and_reload(sid, plan, log):
         time.sleep(3)
     log(
         f"Applying game settings ({plan['max_players']} slots, view/sim "
-        f"distance {plan['view_distance']}/{plan['simulation_distance']})"
+        f"distance {plan['view_distance']}/{plan['simulation_distance']}, "
+        f"spawn-protection off)"
     )
     rpc(
         "ConfigService",
@@ -385,6 +410,7 @@ def apply_settings_and_reload(sid, plan, log):
                 "maxPlayers": str(plan["max_players"]),
                 "viewDistance": str(plan["view_distance"]),
                 "simulationDistance": str(plan["simulation_distance"]),
+                "spawnProtection": "0",
             },
         },
     )
