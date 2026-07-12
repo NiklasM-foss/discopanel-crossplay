@@ -435,12 +435,34 @@ def send_command(sid, cmd):
     return rpc("ServerService", "SendCommand", {"id": sid, "command": cmd})
 
 
+def wait_for_command_ready(sid, timeout=120):
+    """Block until the server accepts console commands.
+
+    Right after a (re)start, DiscoPanel may report boot from the persistent log
+    while the fresh container is not yet 'running' (SendCommand then 400s), so we
+    probe with a harmless command until it actually succeeds.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if send_command(sid, "list").get("success"):
+                return True
+        except Exception:  # noqa: BLE001 - container not ready yet (e.g. 400)
+            pass
+        time.sleep(5)
+    return False
+
+
 def start_chunky_pregen(sid, radius, log):
     """Kick off Chunky world pre-generation (overworld around 0,0).
 
     Fire-and-forget: Chunky generates in the background on the running server and
     resumes across restarts (continue-on-restart), so we don't wait for it.
     """
+    if not wait_for_command_ready(sid):
+        log("Server not accepting commands yet; skipping Chunky pre-generation "
+            "(start it manually with /chunky start)")
+        return
     log(f"Starting Chunky pre-generation (overworld, radius {radius} blocks)")
     for cmd in ("chunky world world", "chunky center 0 0",
                 f"chunky radius {radius}", "chunky start"):
