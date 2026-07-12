@@ -49,6 +49,7 @@
   .result { margin-top: 18px; padding: 16px; border-radius: 10px;
             background: #14203a; border: 1px solid #2c4a86; display: none; }
   .result code { background: #0d1526; padding: 2px 7px; border-radius: 5px; color: #9ec3ff; }
+  .result a { color: #9ec3ff; font-weight: 600; }
   .kv { display: flex; justify-content: space-between; padding: 5px 0; font-size: 14px; border-bottom: 1px solid #22304f; }
   .kv:last-child { border: 0; }
 </style>
@@ -95,6 +96,8 @@
   <p class="meta" id="sizemeta">Zuweisung: <b id="size-ram">…</b> RAM · max. <b id="size-slots">…</b> Spieler (Slots) · Sichtweite <b id="size-view">…</b></p>
 
   <label class="check"><input id="xbox" type="checkbox" checked /> MCXboxBroadcast installieren (Xbox-Freunde-Beitritt)</label>
+  <label class="check"><input id="chunky" type="checkbox" checked /> Chunky installieren (Welt-Vorgenerierung)</label>
+  <label class="check"><input id="betterteams" type="checkbox" checked /> BetterTeams installieren (Teams/Clans)</label>
 
   <p class="meta" id="portmeta">Nächster freier Bedrock-Port: <b id="nextport">…</b></p>
 
@@ -111,6 +114,10 @@
     <div class="kv"><span>Java (über Proxy)</span><code id="r-java"></code></div>
     <div class="kv"><span>Bedrock</span><code id="r-bedrock"></code></div>
     <div class="kv"><span>Bedrock-Port</span><code id="r-port"></code></div>
+    <div class="kv"><span>Befehlslisten</span><span>
+      <a id="r-pdf-player" href="#" target="_blank">Spieler-PDF</a> ·
+      <a id="r-pdf-admin" href="#" target="_blank">Admin-PDF</a>
+    </span></div>
   </div>
 
   <div id="log"></div>
@@ -165,6 +172,7 @@ updateSize();
 ["players", "ram", "slots", "view"].forEach(
   (id) => $(id).addEventListener("input", updateSize)
 );
+$("chunky").addEventListener("change", () => { $("pregen").disabled = !$("chunky").checked; });
 
 function addLine(msg, cls) {
   const box = $("log"); box.style.display = "block";
@@ -193,6 +201,8 @@ $("go").addEventListener("click", async () => {
         view: parseInt($("view").value, 10) || null,
         pregen: $("pregen").value === "" ? null : parseInt($("pregen").value, 10),
         xbox: $("xbox").checked,
+        chunky: $("chunky").checked,
+        betterteams: $("betterteams").checked,
       }),
     })).json();
     if (r.error) throw new Error(r.error);
@@ -215,6 +225,8 @@ $("go").addEventListener("click", async () => {
       $("r-java").textContent = d.connect_java;
       $("r-bedrock").textContent = d.connect_bedrock;
       $("r-port").textContent = d.port;
+      $("r-pdf-player").href = "/download/" + job + "/spieler";
+      $("r-pdf-admin").href = "/download/" + job + "/admin";
       $("result").style.display = "block";
       es.close(); resetBtn(); loadMeta();
     } else if (d.type === "error") {

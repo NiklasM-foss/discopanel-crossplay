@@ -13,7 +13,8 @@ Per created server it:
   * publishes it through the DiscoPanel proxy (custom hostname + base domain)
   * installs the newest crossplay plugin stack (ViaVersion, ViaBackwards,
     ViaRewind, SkinsRestorer, Geyser, Floodgate) plus a small admin stack
-    (EssentialsX, VaultUnlocked, LuckPerms, AntiAFKPlus, Chunky, BetterTeams),
+    (EssentialsX, VaultUnlocked, LuckPerms, AntiAFKPlus; Chunky and BetterTeams
+    are optional and can be deselected in the form),
     disables spawn protection (spawn-protection=0), lifts BetterTeams limits
     (unlimited warps/chests/members/allies/admins), sets up sidebar/tab
     leaderboards (entity kills / deaths), and kicks off Chunky world
@@ -73,17 +74,19 @@ GEYSERMC_PLUGINS = {
 #   admin     : essentialsx (core commands), vaultunlocked (maintained, API-
 #               compatible Vault drop-in that EssentialsX/LuckPerms hook into),
 #               luckperms (permissions), antiafkplus (AFK handling; exempt
-#               players via the "antiafkplus.bypass" permission = the whitelist),
-#               chunky (world pre-generation).
+#               players via the "antiafkplus.bypass" permission = the whitelist).
 MODRINTH_PLUGINS = [
     "viaversion", "viabackwards", "viarewind", "skinsrestorer",
-    "essentialsx", "vaultunlocked", "luckperms", "antiafkplus", "chunky",
+    "essentialsx", "vaultunlocked", "luckperms", "antiafkplus",
 ]
-# BetterTeams (teams/clans plugin) is not on Modrinth/Hangar for Spigot; the
-# canonical plugin publishes release jars on GitHub. We pick the newest release
-# that actually carries a matching jar asset (booksaw only attaches jars to some
-# releases; the rest are SpigotMC-only). (repo, jar name fragment).
-GITHUB_PLUGINS = [("booksaw/BetterTeams", "betterteams")]
+# Optional plugins the create form can deselect.
+#   chunky (Modrinth): world pre-generation.
+#   BetterTeams (teams/clans): not on Modrinth/Hangar for Spigot; the canonical
+#     plugin publishes release jars on GitHub. We pick the newest release that
+#     actually carries a matching jar asset (booksaw only attaches jars to some
+#     releases; the rest are SpigotMC-only). (repo, jar name fragment).
+CHUNKY_SLUG = "chunky"
+BETTERTEAMS_REPO = ("booksaw/BetterTeams", "betterteams")
 MCXBOX_SLUG = "mcxboxbroadcast"
 
 # Geyser config is pre-written before the first boot so crossplay is correct
@@ -246,23 +249,25 @@ def _github_newest_asset(repo, fragment):
     raise RuntimeError(f"no jar asset matching '{fragment}' in {repo} releases")
 
 
-def resolve_plugin_downloads():
-    """Return [(filename, url)] for the whole plugin stack (newest builds)."""
+def resolve_plugin_downloads(install_chunky=True, install_betterteams=True):
+    """Return [(filename, url)] for the selected plugin stack (newest builds)."""
     downloads = []
     for p, fn in GEYSERMC_PLUGINS.items():
         downloads.append((fn, GEYSERMC_DL.format(p=p)))
     for slug in MODRINTH_PLUGINS:
         downloads.append(_modrinth_newest_file(slug))
-    for repo, fragment in GITHUB_PLUGINS:
-        downloads.append(_github_newest_asset(repo, fragment))
+    if install_chunky:
+        downloads.append(_modrinth_newest_file(CHUNKY_SLUG))
+    if install_betterteams:
+        downloads.append(_github_newest_asset(*BETTERTEAMS_REPO))
     return downloads
 
 
-def install_plugins(server_dir, log):
-    """Download the crossplay plugin jars into plugins/."""
+def install_plugins(server_dir, log, install_chunky=True, install_betterteams=True):
+    """Download the selected plugin jars into plugins/."""
     plugins_dir = f"{server_dir}/plugins"
     os.makedirs(plugins_dir, exist_ok=True)
-    for filename, url in resolve_plugin_downloads():
+    for filename, url in resolve_plugin_downloads(install_chunky, install_betterteams):
         log(f"Installing {filename}")
         download(url, f"{plugins_dir}/{filename}")
 
@@ -567,10 +572,12 @@ def wait_for_boot(sid, log, timeout=300):
 # --------------------------------------------------------------------------
 
 JOBS = {}  # job_id -> queue.Queue
+PDFS = {}  # job_id -> {name, xbox, chunky, betterteams} for the command-list PDFs
 
 
 def provision(job_id, name, version, install_xbox, players, memory_gb=None,
-              slots=None, view_distance=None, pregen_radius=None):
+              slots=None, view_distance=None, pregen_radius=None,
+              install_chunky=True, install_betterteams=True):
     q = JOBS[job_id]
 
     def log(msg, **extra):
@@ -655,7 +662,7 @@ def provision(job_id, name, version, install_xbox, players, memory_gb=None,
         # Stage the whole crossplay stack, then reload with a stop+start (never
         # a restart, which would recreate the container).
         log("Installing crossplay plugin stack")
-        install_plugins(server_dir, log)
+        install_plugins(server_dir, log, install_chunky, install_betterteams)
         log(f"Writing Geyser config (Floodgate auth, broadcast port {port})")
         write_geyser_config(server_dir, port)
         if install_xbox:
@@ -667,16 +674,18 @@ def provision(job_id, name, version, install_xbox, players, memory_gb=None,
         log("Server is up; crossplay stack active")
 
         ready = wait_for_command_ready(sid)
-        configure_betterteams(server_dir, sid, log, reload=ready)
+        if install_betterteams:
+            configure_betterteams(server_dir, sid, log, reload=ready)
         if ready:
             setup_leaderboards(sid, log)
         else:
             log("Server not accepting commands yet; leaderboards apply on next "
                 "restart")
 
-        radius = CHUNKY_RADIUS if pregen_radius is None else max(0, int(pregen_radius))
-        if radius > 0:
-            start_chunky_pregen(sid, radius, log)
+        if install_chunky:
+            radius = CHUNKY_RADIUS if pregen_radius is None else max(0, int(pregen_radius))
+            if radius > 0:
+                start_chunky_pregen(sid, radius, log)
 
         if install_xbox:
             surface_xbox_code(sid, log)
@@ -728,6 +737,206 @@ def surface_xbox_code(sid, log):
 
 
 # --------------------------------------------------------------------------
+# Command-list PDFs (grouped by addon, with explanations)
+# --------------------------------------------------------------------------
+
+
+def command_catalog(chunky=True, betterteams=True, xbox=True):
+    """Ordered [(addon, {"player": [(cmd, desc)], "admin": [(cmd, desc)]})].
+
+    Only the addons actually installed on the server are included."""
+    cat = [
+        ("EssentialsX", {
+            "player": [
+                ("/spawn", "Zum Server-Spawn teleportieren."),
+                ("/sethome [name]", "Setzt einen Zuhause-Punkt."),
+                ("/home [name]", "Teleportiert zu einem Zuhause."),
+                ("/delhome <name>", "Loescht ein Zuhause."),
+                ("/tpa <spieler>", "Teleport-Anfrage an einen Spieler senden."),
+                ("/tpaccept", "Teleport-Anfrage annehmen."),
+                ("/tpdeny", "Teleport-Anfrage ablehnen."),
+                ("/back", "Zur letzten Position bzw. zum Todesort zurueck."),
+                ("/msg <spieler> <text>", "Private Nachricht senden."),
+                ("/r <text>", "Auf die letzte private Nachricht antworten."),
+                ("/mail send <spieler> <text>", "Offline-Nachricht hinterlassen."),
+                ("/afk", "AFK-Status an- oder ausschalten."),
+                ("/list", "Zeigt die Online-Spieler."),
+                ("/rules", "Zeigt die Serverregeln."),
+                ("/warp [name]", "Teleportiert zu einem oeffentlichen Warp."),
+                ("/pay <spieler> <betrag>", "Geld ueberweisen (falls Economy aktiv)."),
+                ("/balance", "Zeigt dein Guthaben."),
+            ],
+            "admin": [
+                ("/gamemode <0-3> [spieler]", "Spielmodus (auch /gmc /gms /gmsp /gma)."),
+                ("/give <spieler> <item> [anzahl]", "Item geben."),
+                ("/heal [spieler]", "Leben und Hunger auffuellen."),
+                ("/feed [spieler]", "Hunger auffuellen."),
+                ("/god [spieler]", "Unverwundbarkeit an oder aus."),
+                ("/fly [spieler]", "Flugmodus an oder aus."),
+                ("/tp <spieler> [ziel]", "Teleportieren."),
+                ("/tphere <spieler>", "Spieler zu dir teleportieren."),
+                ("/kick <spieler> [grund]", "Spieler kicken."),
+                ("/ban <spieler> [grund]", "Spieler bannen."),
+                ("/tempban <spieler> <zeit> [grund]", "Zeitlich bannen."),
+                ("/mute <spieler> [zeit]", "Spieler stummschalten."),
+                ("/setwarp <name>", "Oeffentlichen Warp setzen."),
+                ("/delwarp <name>", "Warp loeschen."),
+                ("/setspawn", "Server-Spawn setzen."),
+                ("/broadcast <text>", "Server-weite Nachricht."),
+                ("/vanish", "Unsichtbar werden."),
+                ("/invsee <spieler>", "Inventar eines Spielers ansehen."),
+                ("/time set <wert>", "Tageszeit setzen."),
+                ("/weather <clear|storm>", "Wetter setzen."),
+            ],
+        }),
+        ("LuckPerms (Rechteverwaltung)", {
+            "player": [],
+            "admin": [
+                ("/lp user <spieler> parent add <gruppe>", "Spieler einer Gruppe hinzufuegen."),
+                ("/lp user <spieler> permission set <node> true|false", "Einzelrecht setzen."),
+                ("/lp group <gruppe> permission set <node> true|false", "Gruppenrecht setzen."),
+                ("/lp creategroup <name>", "Neue Gruppe anlegen."),
+                ("/lp editor", "Web-Editor-Link zum Bearbeiten oeffnen."),
+                ("/lp user <spieler> permission set antiafkplus.bypass true",
+                 "Spieler von AFK-Behandlung ausnehmen (AFK-Whitelist)."),
+            ],
+        }),
+        ("AntiAFKPlus", {
+            "player": [("/afk", "AFK-Status manuell umschalten.")],
+            "admin": [
+                ("/antiafkplus reload", "Konfiguration neu laden."),
+                ("Permission antiafkplus.bypass", "Traeger gelten nie als AFK (Whitelist)."),
+            ],
+        }),
+        ("SkinsRestorer", {
+            "player": [
+                ("/skin set <name>", "Skin eines anderen Namens uebernehmen."),
+                ("/skin clear", "Eigenen Skin zuruecksetzen."),
+                ("/skins", "Skin-Auswahl-Menue oeffnen."),
+            ],
+            "admin": [
+                ("/sr reload", "SkinsRestorer neu laden."),
+                ("/sr set <spieler> <name>", "Skin eines Spielers setzen."),
+            ],
+        }),
+        ("Geyser / Floodgate (Crossplay)", {
+            "player": [
+                ("/linkaccount", "Bedrock- und Java-Konto verknuepfen."),
+                ("/unlinkaccount", "Konto-Verknuepfung aufheben."),
+            ],
+            "admin": [
+                ("/geyser reload", "Geyser neu laden."),
+                ("/geyser dump", "Diagnose-Dump erstellen (fuer Support)."),
+                ("/floodgate", "Floodgate-Info anzeigen."),
+            ],
+        }),
+        ("ViaVersion", {
+            "player": [],
+            "admin": [
+                ("/viaversion list", "Client-Versionen der Spieler anzeigen."),
+                ("/viaversion", "Plugin-Status anzeigen."),
+            ],
+        }),
+    ]
+    if betterteams:
+        cat.append(("BetterTeams", {
+            "player": [
+                ("/team create <name>", "Team gruenden."),
+                ("/team join <name>", "Team beitreten (nach Einladung)."),
+                ("/team invite <spieler>", "Spieler einladen."),
+                ("/team leave", "Team verlassen."),
+                ("/team info [name]", "Team-Infos anzeigen."),
+                ("/team chat <text>", "Im Team-Chat schreiben (auch /tc)."),
+                ("/team sethome", "Team-Zuhause setzen."),
+                ("/team home", "Zum Team-Zuhause teleportieren."),
+                ("/team setwarp <name>", "Team-Warp anlegen (unbegrenzt)."),
+                ("/team warp <name>", "Zu einem Team-Warp teleportieren."),
+                ("/team ally <team>", "Buendnis anfragen oder annehmen."),
+                ("/team money", "Team-Bank anzeigen."),
+            ],
+            "admin": [
+                ("/teamadmin reload", "BetterTeams-Konfiguration neu laden."),
+                ("/teamadmin delete <team>", "Team aufloesen."),
+                ("/teamadmin info <team>", "Team-Details (Admin)."),
+            ],
+        }))
+    if chunky:
+        cat.append(("Chunky (Weltvorgenerierung)", {
+            "player": [],
+            "admin": [
+                ("/chunky radius <bloecke>", "Radius der Generierung setzen."),
+                ("/chunky start", "Vorgenerierung starten."),
+                ("/chunky pause", "Pausieren (Fortschritt wird gespeichert)."),
+                ("/chunky continue", "Fortsetzen."),
+                ("/chunky cancel", "Abbrechen und verwerfen."),
+                ("/chunky progress", "Fortschritt anzeigen."),
+            ],
+        }))
+    if xbox:
+        cat.append(("MCXboxBroadcast (Xbox-Freunde)", {
+            "player": [],
+            "admin": [
+                ("Hinweis", "Beim ersten Start einmalig per Xbox-Code anmelden "
+                 "(Code wird im Erstell-Tool angezeigt)."),
+            ],
+        }))
+    cat.append(("Leaderboards (Scoreboard)", {
+        "player": [
+            ("Sidebar rechts", "Rangliste getoeteter Gegner (Entity Kills)."),
+            ("Tab-Liste", "Anzahl Tode hinter jedem Spielernamen."),
+        ],
+        "admin": [
+            ("/scoreboard objectives setdisplay sidebar ekills",
+             "Kill-Rangliste wieder einblenden."),
+            ("/scoreboard objectives setdisplay list deaths",
+             "Tode im Tab wieder einblenden."),
+        ],
+    }))
+    return cat
+
+
+def build_command_pdf(audience, name, chunky=True, betterteams=True, xbox=True):
+    """Render the player or admin command list to PDF bytes."""
+    from fpdf import FPDF  # local import so the app still starts without it
+    from fpdf.enums import XPos, YPos
+
+    def cell(pdf, h, text, **kw):
+        # Always full width, and reset the cursor to the left margin on the next
+        # line (fpdf2's multi_cell otherwise leaves x at the right margin, which
+        # makes a following w=0 cell raise "not enough horizontal space").
+        pdf.multi_cell(pdf.epw, h, text, new_x=XPos.LMARGIN, new_y=YPos.NEXT, **kw)
+
+    title = "Befehlsliste Spieler" if audience == "player" else "Befehlsliste Admins"
+    pdf = FPDF()
+    pdf.set_auto_page_break(True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 18)
+    cell(pdf, 10, title)
+    pdf.set_font("Helvetica", "", 11)
+    pdf.set_text_color(90, 90, 90)
+    cell(pdf, 6, f"Server: {name}")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+    for addon, groups in command_catalog(chunky, betterteams, xbox):
+        cmds = groups.get(audience, [])
+        if not cmds:
+            continue
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_fill_color(232, 232, 236)
+        cell(pdf, 8, addon, fill=True)
+        pdf.ln(1)
+        for cmd, desc in cmds:
+            pdf.set_font("Courier", "B", 10)
+            cell(pdf, 5, cmd)
+            pdf.set_font("Helvetica", "", 10)
+            pdf.set_text_color(70, 70, 70)
+            cell(pdf, 5, "    " + desc)
+            pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+    return bytes(pdf.output())
+
+
+# --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
 
@@ -735,6 +944,21 @@ def surface_xbox_code(sid, log):
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/download/<job_id>/<audience>")
+def download_pdf(job_id, audience):
+    meta = PDFS.get(job_id)
+    if meta is None or audience not in ("spieler", "admin"):
+        return "unknown command list", 404
+    data = build_command_pdf(
+        "player" if audience == "spieler" else "admin",
+        meta["name"], meta["chunky"], meta["betterteams"], meta["xbox"],
+    )
+    return Response(
+        data, mimetype="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="commandliste_{audience}.pdf"'},
+    )
 
 
 @app.route("/api/versions")
@@ -777,6 +1001,8 @@ def create():
     name = (data.get("name") or "").strip()
     version = (data.get("version") or "").strip()
     install_xbox = bool(data.get("xbox", True))
+    install_chunky = bool(data.get("chunky", True))
+    install_betterteams = bool(data.get("betterteams", True))
     try:
         players = int(data.get("players") or 8)
     except (TypeError, ValueError):
@@ -802,10 +1028,18 @@ def create():
         return jsonify({"error": "name and version are required"}), 400
     job_id = uuid.uuid4().hex
     JOBS[job_id] = queue.Queue()
+    # Remember the selection so the command-list PDFs can be built on download.
+    PDFS[job_id] = {
+        "name": name,
+        "xbox": install_xbox,
+        "chunky": install_chunky,
+        "betterteams": install_betterteams,
+    }
     threading.Thread(
         target=provision,
         args=(job_id, name, version, install_xbox, players, memory_gb,
-              slots, view_distance, pregen_radius),
+              slots, view_distance, pregen_radius, install_chunky,
+              install_betterteams),
         daemon=True,
     ).start()
     return jsonify({"job": job_id})

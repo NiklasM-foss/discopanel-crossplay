@@ -35,8 +35,13 @@ and it does the rest.
 - Installs a small **admin plugin stack** on top: **EssentialsX** (core
   commands/homes/warps), **VaultUnlocked** (the maintained, API-compatible Vault
   drop-in that EssentialsX and LuckPerms hook into), **LuckPerms** (permissions),
-  **AntiAFKPlus** (AFK handling), **Chunky** (world pre-generation) and
-  **BetterTeams** (teams/clans).
+  **AntiAFKPlus** (AFK handling), and optionally **Chunky** (world
+  pre-generation) and **BetterTeams** (teams/clans). Chunky and BetterTeams each
+  have a checkbox in the form and can be deselected per server.
+- Generates two **command-list PDFs** per server, grouped by addon with German
+  explanations: `commandliste_spieler.pdf` (player commands) and
+  `commandliste_admin.pdf` (admin commands). They are linked in the result panel
+  and only list the addons that were actually installed.
 - Disables **spawn protection** (`spawn-protection=0`) so non-ops can build near
   spawn.
 - Lifts **BetterTeams limits** to unlimited (warps, chests, team members,
