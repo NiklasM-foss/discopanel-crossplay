@@ -14,7 +14,9 @@ Per created server it:
   * installs the newest crossplay plugin stack (ViaVersion, ViaBackwards,
     ViaRewind, SkinsRestorer, Geyser, Floodgate) plus a small admin stack
     (EssentialsX, VaultUnlocked, LuckPerms, AntiAFKPlus, Chunky, BetterTeams),
-    disables spawn protection (spawn-protection=0), and kicks off Chunky world
+    disables spawn protection (spawn-protection=0), lifts BetterTeams limits
+    (unlimited warps/chests/members/allies/admins), sets up sidebar/tab
+    leaderboards (entity kills / deaths), and kicks off Chunky world
     pre-generation in the background after the first boot
   * assigns the next free Bedrock UDP port from 19132 and forwards it
   * installs the newest MCXboxBroadcast Geyser extension, points it at the
@@ -475,6 +477,77 @@ def start_chunky_pregen(sid, radius, log):
     log("Chunky is pre-generating chunks in the background")
 
 
+# BetterTeams per-team limits to lift to "unlimited" (-1). warps is the one that
+# matters most; the rest ("etc") are the other capacity limits that document -1
+# as unlimited. maxOwners is intentionally left alone (no documented -1).
+BETTERTEAMS_UNLIMITED_KEYS = ("maxWarps", "maxChests", "teamLimit",
+                              "maxAdmins", "allyLimit")
+_BT_LIMIT_RE = re.compile(
+    r"^(\s*)(" + "|".join(BETTERTEAMS_UNLIMITED_KEYS) + r"):\s*-?\d+\s*$"
+)
+
+
+def patch_betterteams_unlimited(config_path):
+    """Rewrite BetterTeams limit keys to -1 (unlimited). Returns True if changed.
+
+    Value-independent and comment-safe: only lines like `<indent>key: <int>` are
+    touched (comment lines start with '#', so they never match)."""
+    if not os.path.exists(config_path):
+        return False
+    with open(config_path, encoding="utf-8") as fh:
+        lines = fh.readlines()
+    changed = False
+    for i, line in enumerate(lines):
+        m = _BT_LIMIT_RE.match(line)
+        if m and line.strip() != f"{m.group(2)}: -1":
+            lines[i] = f"{m.group(1)}{m.group(2)}: -1\n"
+            changed = True
+    if changed:
+        with open(config_path, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+    return changed
+
+
+def configure_betterteams(server_dir, sid, log, reload=True):
+    """Set BetterTeams warps/chests/members/allies/admins to unlimited.
+
+    Patches config.yml on disk (takes effect on next boot regardless) and, if the
+    server is accepting commands, live-reloads it with `teamadmin reload`."""
+    cfg = f"{server_dir}/plugins/BetterTeams/config.yml"
+    if not patch_betterteams_unlimited(cfg):
+        return
+    log("BetterTeams: warps/chests/members/allies/admins set to unlimited")
+    if reload:
+        try:
+            send_command(sid, "teamadmin reload")
+        except Exception as e:  # noqa: BLE001
+            log(f"BetterTeams reload failed ({e}); applies on next restart")
+
+
+# Vanilla scoreboard leaderboards: (objective, criterion, display slot, title).
+# sidebar = right-hand list, list = the tab player list. Both persist in the
+# world's scoreboard data and update live as players kill mobs / die.
+LEADERBOARDS = [
+    ("ekills", "minecraft.custom:minecraft.mob_kills", "sidebar",
+     '{"text":"Entity Kills","color":"gold"}'),
+    ("deaths", "deathCount", "list", '{"text":"Tode","color":"red"}'),
+]
+
+
+def setup_leaderboards(sid, log):
+    """Create the sidebar (entity kills) and tab (deaths) leaderboards.
+
+    Re-adding an existing objective just no-ops (SendCommand reports the failure
+    without raising), so this is safe to run again."""
+    log("Setting up leaderboards (sidebar: entity kills, tab: deaths)")
+    for name, crit, slot, title in LEADERBOARDS:
+        try:
+            send_command(sid, f"scoreboard objectives add {name} {crit} {title}")
+            send_command(sid, f"scoreboard objectives setdisplay {slot} {name}")
+        except Exception as e:  # noqa: BLE001
+            log(f"Leaderboard '{name}' setup failed: {e}")
+
+
 def wait_for_boot(sid, log, timeout=300):
     """Block until Paper reports startup complete (or Geyser has started)."""
     ready = re.compile(r'Done \(|Started Geyser|Geyser.*started', re.I)
@@ -592,6 +665,14 @@ def provision(job_id, name, version, install_xbox, players, memory_gb=None,
 
         wait_for_boot(sid, log)
         log("Server is up; crossplay stack active")
+
+        ready = wait_for_command_ready(sid)
+        configure_betterteams(server_dir, sid, log, reload=ready)
+        if ready:
+            setup_leaderboards(sid, log)
+        else:
+            log("Server not accepting commands yet; leaderboards apply on next "
+                "restart")
 
         radius = CHUNKY_RADIUS if pregen_radius is None else max(0, int(pregen_radius))
         if radius > 0:

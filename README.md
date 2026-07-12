@@ -39,6 +39,12 @@ and it does the rest.
   **BetterTeams** (teams/clans).
 - Disables **spawn protection** (`spawn-protection=0`) so non-ops can build near
   spawn.
+- Lifts **BetterTeams limits** to unlimited (warps, chests, team members,
+  allies, admins) by patching `plugins/BetterTeams/config.yml` (`-1`) and running
+  `teamadmin reload`.
+- Sets up two **scoreboard leaderboards** (vanilla, no extra plugin): a sidebar
+  (right) ranking **entity kills** and a tab-list objective showing **deaths**.
+  They persist in the world and update live.
 - Kicks off **Chunky world pre-generation** in the background right after the
   first boot (overworld around 0,0). The radius is `CHUNKY_RADIUS` blocks
   (default 1000) and can be overridden per server in the form (empty = default,
