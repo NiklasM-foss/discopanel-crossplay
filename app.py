@@ -13,8 +13,9 @@ Per created server it:
   * publishes it through the DiscoPanel proxy (custom hostname + base domain)
   * installs the newest crossplay plugin stack (ViaVersion, ViaBackwards,
     ViaRewind, SkinsRestorer, Geyser, Floodgate) plus a small admin stack
-    (EssentialsX, VaultUnlocked, LuckPerms, AntiAFKPlus, Chunky, BetterTeams)
-    and disables spawn protection (spawn-protection=0)
+    (EssentialsX, VaultUnlocked, LuckPerms, AntiAFKPlus, Chunky, BetterTeams),
+    disables spawn protection (spawn-protection=0), and kicks off Chunky world
+    pre-generation in the background after the first boot
   * assigns the next free Bedrock UDP port from 19132 and forwards it
   * installs the newest MCXboxBroadcast Geyser extension, points it at the
     public IP and the server's Bedrock port, and surfaces the one-time
@@ -51,6 +52,9 @@ BEDROCK_MAX = int(os.environ.get("BEDROCK_MAX", "19199"))
 PROXY_LISTENER = os.environ.get("PROXY_LISTENER", "default")
 BIND_HOST = os.environ.get("BIND_HOST", "0.0.0.0")
 BIND_PORT = int(os.environ.get("BIND_PORT", "5005"))
+# Default Chunky world pre-generation radius in blocks (0 disables). The form can
+# override this per server; pre-generation runs in the background after boot.
+CHUNKY_RADIUS = int(os.environ.get("CHUNKY_RADIUS", "1000"))
 
 # Geyser-Spigot and Floodgate-Spigot are not on Modrinth for Spigot/Paper;
 # they come from the canonical GeyserMC download API (always the newest build).
@@ -426,6 +430,29 @@ def fetch_logs_text(sid, lines=150):
     return re.sub(r"\x1b\[[0-9;]*m", "", "\n".join(msgs))
 
 
+def send_command(sid, cmd):
+    """Run a console command on a running server via DiscoPanel."""
+    return rpc("ServerService", "SendCommand", {"id": sid, "command": cmd})
+
+
+def start_chunky_pregen(sid, radius, log):
+    """Kick off Chunky world pre-generation (overworld around 0,0).
+
+    Fire-and-forget: Chunky generates in the background on the running server and
+    resumes across restarts (continue-on-restart), so we don't wait for it.
+    """
+    log(f"Starting Chunky pre-generation (overworld, radius {radius} blocks)")
+    for cmd in ("chunky world world", "chunky center 0 0",
+                f"chunky radius {radius}", "chunky start"):
+        try:
+            send_command(sid, cmd)
+        except Exception as e:  # noqa: BLE001
+            log(f"Chunky command failed ('{cmd}'): {e}; skipping pre-generation")
+            return
+        time.sleep(1)
+    log("Chunky is pre-generating chunks in the background")
+
+
 def wait_for_boot(sid, log, timeout=300):
     """Block until Paper reports startup complete (or Geyser has started)."""
     ready = re.compile(r'Done \(|Started Geyser|Geyser.*started', re.I)
@@ -448,7 +475,7 @@ JOBS = {}  # job_id -> queue.Queue
 
 
 def provision(job_id, name, version, install_xbox, players, memory_gb=None,
-              slots=None, view_distance=None):
+              slots=None, view_distance=None, pregen_radius=None):
     q = JOBS[job_id]
 
     def log(msg, **extra):
@@ -543,6 +570,10 @@ def provision(job_id, name, version, install_xbox, players, memory_gb=None,
 
         wait_for_boot(sid, log)
         log("Server is up; crossplay stack active")
+
+        radius = CHUNKY_RADIUS if pregen_radius is None else max(0, int(pregen_radius))
+        if radius > 0:
+            start_chunky_pregen(sid, radius, log)
 
         if install_xbox:
             surface_xbox_code(sid, log)
@@ -657,6 +688,13 @@ def create():
     memory_gb = opt_num("memory", float)
     slots = opt_num("slots", int)
     view_distance = opt_num("view", int)
+    # pregen: empty -> None (use default radius), 0 -> off, N -> radius. Can't use
+    # opt_num here because it maps 0 to None (which would mean "default").
+    pregen_raw = data.get("pregen")
+    try:
+        pregen_radius = int(pregen_raw) if pregen_raw not in (None, "") else None
+    except (TypeError, ValueError):
+        pregen_radius = None
     if not name or not version:
         return jsonify({"error": "name and version are required"}), 400
     job_id = uuid.uuid4().hex
@@ -664,7 +702,7 @@ def create():
     threading.Thread(
         target=provision,
         args=(job_id, name, version, install_xbox, players, memory_gb,
-              slots, view_distance),
+              slots, view_distance, pregen_radius),
         daemon=True,
     ).start()
     return jsonify({"job": job_id})

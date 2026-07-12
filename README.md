@@ -39,6 +39,10 @@ and it does the rest.
   **BetterTeams** (teams/clans).
 - Disables **spawn protection** (`spawn-protection=0`) so non-ops can build near
   spawn.
+- Kicks off **Chunky world pre-generation** in the background right after the
+  first boot (overworld around 0,0). The radius is `CHUNKY_RADIUS` blocks
+  (default 1000) and can be overridden per server in the form (empty = default,
+  `0` = off). Chunky keeps generating across restarts.
 - Assigns the **next free Bedrock UDP port** starting at `19132`
   (server 1 → 19132, server 2 → 19133, …) and forwards it as an additional
   UDP port. That range is already DNAT-forwarded end-to-end by the public

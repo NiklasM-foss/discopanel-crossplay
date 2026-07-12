@@ -85,8 +85,12 @@
       <label for="view">Sichtweite (Chunks)</label>
       <input id="view" type="number" min="2" max="32" step="1" placeholder="auto" />
     </div>
+    <div>
+      <label for="pregen">Vorgen. (Radius Blöcke)</label>
+      <input id="pregen" type="number" min="0" max="20000" step="500" placeholder="1000" />
+    </div>
   </div>
-  <p class="meta">Leer = automatisch nach Spielerzahl. Werte überschreiben die Automatik.</p>
+  <p class="meta">Leer = automatisch nach Spielerzahl. Werte überschreiben die Automatik. Vorgenerierung: leer = 1000, 0 = aus.</p>
 
   <p class="meta" id="sizemeta">Zuweisung: <b id="size-ram">…</b> RAM · max. <b id="size-slots">…</b> Spieler (Slots) · Sichtweite <b id="size-view">…</b></p>
 
@@ -187,6 +191,7 @@ $("go").addEventListener("click", async () => {
         memory: parseInt($("ram").value, 10) || null,
         slots: parseInt($("slots").value, 10) || null,
         view: parseInt($("view").value, 10) || null,
+        pregen: $("pregen").value === "" ? null : parseInt($("pregen").value, 10),
         xbox: $("xbox").checked,
       }),
     })).json();
