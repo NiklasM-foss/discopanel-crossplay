@@ -40,6 +40,17 @@ fi
 echo ">> Installing systemd unit"
 sed "s/^User=.*/User=$RUN_USER/" "$SRC/discopanel-crossplay.service" > "$UNIT"
 
+# Scoped sudo rule so the service can pin a server container's restart policy to
+# "no" (autostart then depends solely on DiscoPanel). Only this exact command is
+# allowed, without a password.
+DOCKER_BIN="$(command -v docker || echo /usr/bin/docker)"
+SUDOERS=/etc/sudoers.d/discopanel-crossplay
+echo ">> Installing scoped sudo rule ($SUDOERS)"
+printf 'ALL=(root) NOPASSWD: %s update --restart no discopanel-server-*\n' \
+  "$DOCKER_BIN" | sed "s/^/$RUN_USER /" > "$SUDOERS"
+chmod 440 "$SUDOERS"
+visudo -cf "$SUDOERS" >/dev/null || { echo "Invalid sudoers rule, removing"; rm -f "$SUDOERS"; }
+
 systemctl daemon-reload
 systemctl enable --now discopanel-crossplay.service
 

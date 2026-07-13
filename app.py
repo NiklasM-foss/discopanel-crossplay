@@ -17,8 +17,9 @@ Per created server it:
     are optional and can be deselected in the form),
     disables spawn protection (spawn-protection=0), lifts BetterTeams limits
     (unlimited warps/chests/members/allies/admins), sets up sidebar/tab
-    leaderboards (entity kills / deaths), and kicks off Chunky world
-    pre-generation in the background after the first boot
+    leaderboards (entity kills / deaths), kicks off Chunky world pre-generation
+    in the background after the first boot, and pins the container's Docker
+    restart policy to "no" so autostart is controlled only by DiscoPanel
   * assigns the next free Bedrock UDP port from 19132 and forwards it
   * installs the newest MCXboxBroadcast Geyser extension, points it at the
     public IP and the server's Bedrock port, and surfaces the one-time
@@ -33,6 +34,7 @@ import os
 import queue
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -58,6 +60,13 @@ BIND_PORT = int(os.environ.get("BIND_PORT", "5005"))
 # Default Chunky world pre-generation radius in blocks (0 disables). The form can
 # override this per server; pre-generation runs in the background after boot.
 CHUNKY_RADIUS = int(os.environ.get("CHUNKY_RADIUS", "1000"))
+
+# DiscoPanel always creates server containers with the Docker restart policy
+# "unless-stopped", which re-starts a running server on host/Docker reboot
+# regardless of DiscoPanel's own AutoStart flag. Setting this to "no" (via a
+# scoped sudo rule for `docker update`) makes autostart purely DiscoPanel-driven.
+# Set to "" to leave DiscoPanel's default untouched.
+CONTAINER_RESTART = os.environ.get("CONTAINER_RESTART", "no")
 
 # Geyser-Spigot and Floodgate-Spigot are not on Modrinth for Spigot/Paper;
 # they come from the canonical GeyserMC download API (always the newest build).
@@ -442,6 +451,31 @@ def send_command(sid, cmd):
     return rpc("ServerService", "SendCommand", {"id": sid, "command": cmd})
 
 
+def apply_restart_policy(sid, log):
+    """Set the server container's Docker restart policy to CONTAINER_RESTART.
+
+    DiscoPanel hardcodes "unless-stopped" on every (re)created container, so a
+    running server would come back after a host reboot regardless of DiscoPanel's
+    AutoStart flag. Overriding it to "no" leaves autostart entirely to DiscoPanel.
+    Needs a scoped sudo rule (docker update --restart no discopanel-server-*).
+    """
+    if not CONTAINER_RESTART:
+        return
+    container = f"discopanel-server-{sid}"
+    try:
+        subprocess.run(
+            ["sudo", "-n", "/usr/bin/docker", "update", "--restart",
+             CONTAINER_RESTART, container],
+            check=True, capture_output=True, timeout=30,
+        )
+        log(f"Docker restart policy set to '{CONTAINER_RESTART}' "
+            "(autostart controlled only by DiscoPanel)")
+    except Exception as e:  # noqa: BLE001
+        detail = getattr(e, "stderr", b"")
+        detail = detail.decode(errors="replace").strip() if detail else e
+        log(f"Could not set restart policy ({detail})")
+
+
 def wait_for_command_ready(sid, timeout=120):
     """Block until the server accepts console commands.
 
@@ -689,6 +723,10 @@ def provision(job_id, name, version, install_xbox, players, memory_gb=None,
 
         if install_xbox:
             surface_xbox_code(sid, log)
+
+        # Final step: the container is stable now (no more recreations), so pin
+        # its restart policy - DiscoPanel would otherwise leave it unless-stopped.
+        apply_restart_policy(sid, log)
 
         q.put(
             {

@@ -50,6 +50,11 @@ and it does the rest.
 - Sets up two **scoreboard leaderboards** (vanilla, no extra plugin): a sidebar
   (right) ranking **entity kills** and a tab-list objective showing **deaths**.
   They persist in the world and update live.
+- Pins the server container's **Docker restart policy to `no`** after
+  provisioning (`CONTAINER_RESTART`), so autostart is controlled only by
+  DiscoPanel's AutoStart flag. DiscoPanel otherwise leaves every container on
+  `unless-stopped`, which restarts running servers on host reboot regardless of
+  AutoStart. Uses a scoped, password-less sudo rule installed by `install.sh`.
 - Kicks off **Chunky world pre-generation** in the background right after the
   first boot (overworld around 0,0). The radius is `CHUNKY_RADIUS` blocks
   (default 1000) and can be overridden per server in the form (empty = default,
