@@ -392,6 +392,30 @@ def wait_for_path(sid, subpath, what, timeout):
     raise RuntimeError(f"timed out waiting for {what}")
 
 
+def wait_for_world(server_dir, log, timeout=300):
+    """Block until the freshly created world is completely written to disk.
+
+    The world folder appears early in the first boot, but the world gen settings
+    (seed, generator, dimensions) are only written once the boot has finished.
+    Stopping in between leaves a stub world that no later start can load - Paper
+    then aborts with "Overworld settings missing" on every single start.
+    """
+    world = os.path.join(server_dir, "world")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(os.path.join(world, "level.dat")):
+            dims = os.path.join(world, "dimensions")
+            gen = os.path.join(dims, "minecraft", "overworld", "data",
+                               "minecraft", "world_gen_settings.dat")
+            # Older layouts keep the settings inside level.dat and never create
+            # dimensions/, so there is nothing else to wait for there.
+            if not os.path.isdir(dims) or os.path.exists(gen):
+                return True
+        time.sleep(5)
+    log("World does not look fully written yet; continuing anyway")
+    return False
+
+
 def server_status(sid):
     for s in list_servers():
         if s.get("id") == sid:
@@ -692,6 +716,13 @@ def provision(job_id, name, version, install_xbox, players, memory_gb=None,
         log("Starting server (first boot to initialise the data directory)")
         start_server(sid, log)
         server_dir = wait_for_path(sid, "plugins", "server to finish first boot", 300)
+
+        # plugins/ shows up long before the world is done. The stop further down
+        # must not interrupt the world creation, otherwise the server is left
+        # with an unloadable world, so wait for the boot to really finish.
+        log("Waiting for the first boot to finish creating the world")
+        wait_for_boot(sid, log)
+        wait_for_world(server_dir, log)
 
         # Stage the whole crossplay stack, then reload with a stop+start (never
         # a restart, which would recreate the container).
